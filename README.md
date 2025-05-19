@@ -6,7 +6,7 @@
   <img src="images/README/1747626032650.png" width="700" alt="NanaClock Schematic">
 </p>
 
-> [!INOTE]
+> [!NOTE] 
 > The OLED shown in the image is a different model, but the pinout is the same.
 
 ---
