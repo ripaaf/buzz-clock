@@ -1,4 +1,4 @@
-# NanaClock ESP8266
+# BuzzClock ESP8266
 
 **NanaClock** is a digital alarm clock project based on ESP8266, featuring Wi-Fi setup, OLED animations (with anime and default themes!), Web API, alarm music via buzzer, and now supports **DHT22 temperature & humidity sensor**! Easily configured through a web browser, it displays animated bitmaps and real-time environment data at specific times.
 
