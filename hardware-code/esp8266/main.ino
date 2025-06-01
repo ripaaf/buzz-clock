@@ -10,6 +10,16 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <ESP8266HTTPClient.h>
+#include <Fonts/FreeSansBoldOblique12pt7b.h>
+#include <Fonts/FreeSansBoldOblique9pt7b.h>
+#include <Fonts/Picopixel.h>
+#include <Fonts/Org_01.h>
+#include <DHT.h>
+
+// --- DHT Sensor setup ---
+#define DHTPIN 12            // Change if your DHT sensor is on another pin
+#define DHTTYPE DHT22       // Or DHT11
+DHT dht(DHTPIN, DHTTYPE);
 
 // --- OLED setup ---
 #define SCREEN_WIDTH 128
@@ -41,15 +51,19 @@ struct Config {
   BuzzEntry buzzTimes[MAX_BUZZ];
   int bitmapWindowStart; // <--- Start minute (0..59)
   int bitmapWindowEnd;   // <--- End minute (0..59)
+	int displayTheme;
 };
 
 Config config;
 #define CONFIG_FILENAME "/config.json"
 
+// --- Setup dht ---
+unsigned long lastDHTRead = 0;
+float cachedTemp = NAN, cachedHum = NAN;
+
 // --- Web Server ---
 ESP8266WebServer server(80);
 
-// --- Bitmap frames placeholder (define your bitmaps elsewhere as needed) ---
 // 'frame_00_delay-0', 128x64px
 const unsigned char epd_bitmap_frame_00_delay_0 [] PROGMEM = {
 	0xff, 0xff, 0xff, 0xff, 0xfc, 0x20, 0xff, 0xff, 0xe0, 0x00, 0x00, 0x03, 0xff, 0xff, 0xff, 0xff, 
@@ -1641,6 +1655,7 @@ void saveConfig() {
   doc["utcOffset"] = config.utcOffset;
   doc["bitmapWindowStart"] = config.bitmapWindowStart;
   doc["bitmapWindowEnd"] = config.bitmapWindowEnd;
+  doc["displayTheme"] = config.displayTheme;
   JsonArray arr = doc.createNestedArray("buzzTimes");
   for (int i = 0; i < MAX_BUZZ; i++) {
     JsonObject obj = arr.createNestedObject();
@@ -1662,6 +1677,7 @@ bool loadConfig() {
   config.ssid = doc["ssid"].as<String>();
   config.pass = doc["pass"].as<String>();
   config.utcOffset = doc["utcOffset"] | 7;
+  config.displayTheme = doc["displayTheme"] | 0; // default to 0
   config.bitmapWindowStart = doc["bitmapWindowStart"] | 20; // default 20
   config.bitmapWindowEnd = doc["bitmapWindowEnd"] | 30;     // default 30
   JsonArray arr = doc["buzzTimes"].as<JsonArray>();
@@ -1710,6 +1726,18 @@ String message =
     "\n"
     "Show current window:\n"
     "  http://<esp_ip>/bitmapwindow\n"
+    "\n"
+    "Switch to anime theme:\n"
+    "  http://<esp_ip>/displaytheme?theme=1\n"
+    "\n"
+    "Switch to default theme:\n"
+    "  http://<esp_ip>/displaytheme?theme=0\n"
+    "\n"
+    "Query current theme:\n"
+    "  http://<esp_ip>/displaytheme\n"
+    "\n"
+    "Get temperature and humidity (DHT):\n"
+    "  http://<esp_ip>/getdht\n"
     "-----------------------------------------\n"
     "Nana will always play 'hedwig' unless you pick another song~\n";
 
@@ -1832,6 +1860,38 @@ void handleIpAddress() {
 void handleGetWiFi() {
   String ssid = WiFi.SSID();
   server.send(200, "text/plain", ssid);
+}
+
+void handleGetDHT() {
+  float t = cachedTemp;
+  float h = cachedHum;
+
+  Serial.print("DHT read attempt. Temp: ");
+  Serial.print(t);
+  Serial.print(" C, Humidity: ");
+  Serial.print(h);
+  Serial.println(" %");
+
+  if (!isnan(t) && !isnan(h)) {
+    String response = "{\"temperature\":" + String(t, 1) + ",\"humidity\":" + String(h, 1) + "}";
+		server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json", response);
+  } else {
+    Serial.println("Sensor error: DHT returned NaN values.");
+		server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(500, "text/plain", "Sensor error");
+  }
+}
+
+void handleDisplayTheme() {
+  if (server.hasArg("theme")) {
+    int theme = server.arg("theme").toInt();
+    config.displayTheme = (theme == 1) ? 1 : 0;
+    saveConfig();
+    server.send(200, "text/plain", "Theme set.");
+  } else {
+    server.send(200, "text/plain", String(config.displayTheme));
+  }
 }
 
 // TO DO : MAKE THE FUCKING POST TO SERVER WORKS
@@ -1979,36 +2039,120 @@ void animateBitmap() {
   }
 }
 
+// --- showing the time in tft ---
 void showTime() {
   int h = timeClient->getHours();
   int m = timeClient->getMinutes();
-
-  display.clearDisplay();
-  
-  // Display the time centered
-  display.setTextSize(3);
   char timeStr[6];
   snprintf(timeStr, sizeof(timeStr), "%02d:%02d", h, m);
-  
-  int16_t x1, y1;
-  uint16_t w, h1;
-  display.getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h1);
-  int x = (128 - w) / 2;
-  int y = (64 - h1) / 2;
-  
-  display.setCursor(x, y);
+
+  float t = cachedTemp;
+  float hmd = cachedHum;
+
+  char thStr[16];
+  if (!isnan(t) && !isnan(hmd)) {
+    snprintf(thStr, sizeof(thStr), "%dC | %d%%", int(round(t)), int(round(hmd)));
+  } else {
+    snprintf(thStr, sizeof(thStr), "--C | --%%");
+  }
+
+  display.clearDisplay();
+
+  // Big time
+  display.setTextColor(1);
+  display.setTextSize(2); // Set before setFont to avoid weirdness
+  display.setTextWrap(false);
+  display.setFont(&FreeSansBoldOblique12pt7b);
+  display.setCursor(1, 44);
   display.print(timeStr);
 
-  // display the IP address at the bottom-left corner
-  display.setTextSize(1);
-  String ipAddress = WiFi.localIP().toString();
-  
-  // Position at bottom-left: x=0, y = display height - font height
-  int16_t ip_x = 0;
-  int16_t ip_y = 64 - 8;  // 8 is approximate font height for text size 1
-  
-  display.setCursor(ip_x, ip_y);
-  display.print(ipAddress);
+  // Bottom left: IP
+  display.setTextSize(1); // Set before setFont to avoid weirdness
+  display.setFont(&Picopixel);
+  display.setCursor(0, 63);
+  display.print(WiFi.localIP().toString());
+
+  // Top right: UTC
+  char utcStr[8];
+  snprintf(utcStr, sizeof(utcStr), "UTC+%d", config.utcOffset);
+  display.setCursor(104, 5);
+  display.print(utcStr);
+
+  // Bottom right: temp | hum
+  display.setFont(&Org_01);
+  display.setCursor(77, 62);
+  display.print(thStr);
+
+  display.display();
+}
+
+
+// anime themed
+static const unsigned char PROGMEM image_Layer_1_bits[] = {0xff,0xff,0xff,0xf8,0xff,0xff,0xeb,0xf8,0xff,0xff,0xdd,0xf8,0xff,0xff,0xbf,0xf8,0xff,0xfe,0xff,0xf8,0xff,0xe7,0xff,0xf8,0xff,0x3f,0xff,0xf8,0xf9,0xf3,0xe7,0xf8,0xef,0xfc,0xcb,0xf8,0xff,0xf3,0x80,0x00,0xf8,0x7e,0x03,0xf8,0xcf,0xff,0x00,0xf8,0x3f,0xf3,0xc1,0xc0,0xff,0x9f,0x47,0x08,0xfe,0xfe,0x53,0xe0,0xfd,0xfe,0x91,0xf8,0xf3,0xfd,0x83,0xf8,0xe7,0xfd,0x40,0x78,0xcf,0xfc,0xc1,0xb8,0x1f,0xfc,0x81,0xf8,0xbf,0xfd,0x01,0xb8,0x7f,0xfd,0x22,0x78,0xff,0xf9,0x87,0xf8,0xff,0xf6,0x93,0xf8,0xff,0xfa,0xbf,0xf8,0xff,0xf9,0x3f,0xf8,0xff,0xdc,0x7f,0xf8,0xff,0xf9,0x7f,0xf8,0xff,0xe7,0xff,0xf8,0xff,0xfa,0xff,0xf8,0xff,0xf6,0xfb,0xf8,0xff,0xfd,0xc7,0xf8,0xff,0x79,0xa2,0x78,0xfe,0xf3,0xc1,0x38,0xff,0xcb,0xc1,0xf8,0xfe,0x3b,0xc1,0xb8,0xf5,0x7b,0xc0,0x78,0xf8,0x1b,0xe2,0xf8,0xff,0x1f,0xe5,0xf8,0xfe,0x30,0xf3,0xe0,0xff,0xf8,0x00,0x00,0xff,0xff,0xff,0xf8,0xef,0xff,0xff,0xf8,0xf9,0xff,0xff,0xf8,0x7f,0x1f,0xff,0xf8,0xdf,0xf8,0x07,0xf8,0xf7,0xbf,0xff,0xf8,0xff,0x3f,0xff,0xf8,0xff,0xe7,0xff,0xf8,0xff,0xfd,0xfe,0xf8,0xff,0xfe,0xfd,0xf8,0xff,0xff,0x7b,0xf8,0xff,0xff,0xf7,0xf8,0xff,0xff,0xff,0xf8};
+
+static const unsigned char PROGMEM image_Layer_12_bits[] = {0x80,0x00,0x00,0x00,0x80,0x00,0x00,0x00,0xc0,0x00,0x00,0x00,0xe0,0x00,0x00,0x00,0xf0,0x00,0x00,0x04,0x7f,0xe0,0x03,0xfc,0x1e,0x78,0x00,0xf0,0x08,0x0f,0x00,0x00};
+
+static const unsigned char PROGMEM image_Layer_5_bits[] = {0x40,0x00,0x60,0x00,0x60,0x00,0xe0,0x00,0x70,0x00,0x38,0x00,0x3c,0x00,0x3e,0x00,0x3f,0x80,0x03,0x80};
+
+static const unsigned char PROGMEM image_Layer_6_bits[] = {0xf0,0x7c,0x38,0x1c,0x1c,0x08,0x08,0x08};
+
+static const unsigned char PROGMEM image_Layer_8_bits[] = {0xf0,0x78,0x38,0x10,0x18};
+
+void showAnimeTheme() {
+	display.clearDisplay();
+
+	display.drawBitmap(0, 0, image_Layer_1_bits, 29, 54, 1);
+
+	display.fillRect(0, 54, 29, 3, 1);
+
+	display.fillRect(0, 57, 48, 7, 1);
+
+	display.setTextColor(0);
+	display.setTextWrap(false);
+	display.setFont(&Picopixel);
+	display.setCursor(2, 62);
+  display.print(WiFi.localIP().toString());
+
+	display.drawBitmap(27, 48, image_Layer_5_bits, 9, 10, 1);
+
+	display.drawBitmap(44, 56, image_Layer_6_bits, 6, 8, 0);
+
+	display.setTextColor(1);
+	display.setTextSize(2);
+	display.setFont(&FreeSansBoldOblique9pt7b);
+	display.setCursor(29, 41);
+
+  int h = timeClient->getHours();
+  int m = timeClient->getMinutes();
+  char timeStr[6];
+  snprintf(timeStr, sizeof(timeStr), "%02d:%02d", h, m);
+  display.print(timeStr);
+
+	display.drawBitmap(25, 0, image_Layer_8_bits, 5, 5, 0);
+
+	display.fillRect(99, 0, 29, 9, 1);
+
+  float t = cachedTemp;
+  float hmd = cachedHum;
+  char thStr[16];
+  if (!isnan(t) && !isnan(hmd)) {
+    snprintf(thStr, sizeof(thStr), "%dC | %d%%", int(round(t)), int(round(hmd)));
+  } else {
+    snprintf(thStr, sizeof(thStr), "--C | --%%");
+  }
+	display.setTextSize(1);
+	display.setFont(&Org_01);
+	display.setCursor(77, 62);
+  display.print(thStr);
+
+  display.setTextColor(0);
+  display.setFont(&Picopixel);
+  display.setCursor(104, 5);
+  char utcStr[8];
+  snprintf(utcStr, sizeof(utcStr), "UTC+%d", config.utcOffset);
+  display.print(utcStr);
+
+	display.drawBitmap(98, 3, image_Layer_12_bits, 30, 8, 0);
 
   display.display();
 }
@@ -2023,11 +2167,31 @@ void showInfo(const String &msg) {
   delay(2000);
 }
 
-// --- Setup ---
+void updateDHTIfNeeded() {
+  if (millis() - lastDHTRead >= 2000) {
+    yield();
+    float t = dht.readTemperature();
+    float h = dht.readHumidity();
+    yield();
+    if (!isnan(t) && !isnan(h)) {
+      cachedTemp = t;
+      cachedHum = h;
+    }
+    lastDHTRead = millis();
+  }
+}
+
+
 void setup() {
   Serial.begin(9600);
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
+
+	pinMode(DHTPIN, INPUT_PULLUP);
+	dht.begin(); //dht
+	Serial.println("DHT sensor initialization called");
+
+  delay(2000); // wait for sensor to settle
 
   if (!LittleFS.begin()) {
     Serial.println("LittleFS failed!");
@@ -2078,7 +2242,7 @@ void setup() {
     if (WiFi.status() == WL_CONNECTED) {
       wifiConnected = true;
 			delay(3000);
-			sendIpAddressToServer(); //sending ip to the server
+			// sendIpAddressToServer(); //sending ip to the server
 			delay(3000);
     }
   }
@@ -2120,6 +2284,8 @@ void setup() {
   server.on("/getwifi", handleGetWiFi);
   server.on("/bitmapwindow", handleBitmapWindow);
 	server.on("/ipaddress", handleIpAddress);
+	server.on("/getdht", handleGetDHT);
+	server.on("/displaytheme", handleDisplayTheme);
   server.begin();
   showInfo("Nana Ready! IP:" + WiFi.localIP().toString());
   delay(5000);
@@ -2147,12 +2313,27 @@ bool hasBuzzedThisMinute = false;
 void loop() {
   server.handleClient();
   timeClient->update();
+  updateDHTIfNeeded();
 
   int h = timeClient->getHours();
   int m = timeClient->getMinutes();
 
   char curTime[6];
   snprintf(curTime, sizeof(curTime), "%02d:%02d", h, m);
+
+  // Animated bitmap window
+  bool showBitmap = (m >= config.bitmapWindowStart && m < config.bitmapWindowEnd);
+  if (showBitmap) {
+    animateBitmap();
+    return;
+  }
+
+  // show time 
+  if (config.displayTheme == 1) {
+      showAnimeTheme();
+  } else {
+      showTime();
+  }
 
   // Buzz logic
   bool shouldBuzz = false;
@@ -2172,14 +2353,5 @@ void loop() {
     hasBuzzedThisMinute = false;
   }
 
-  // Animated bitmap window
-  bool showBitmap = (m >= config.bitmapWindowStart && m < config.bitmapWindowEnd);
-  if (showBitmap) {
-    animateBitmap();
-    return;
-  }
-
-  // Show time
-  showTime();
   delay(1000);
 }
