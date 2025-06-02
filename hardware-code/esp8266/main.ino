@@ -57,13 +57,14 @@ struct Config {
 Config config;
 #define CONFIG_FILENAME "/config.json"
 
-// --- Setup dht ---
+// --- Setup ---
 unsigned long lastDHTRead = 0;
 float cachedTemp = NAN, cachedHum = NAN;
 
 // --- Web Server ---
 ESP8266WebServer server(80);
 
+// --- Bitmap frames placeholder (define your bitmaps elsewhere as needed) ---
 // 'frame_00_delay-0', 128x64px
 const unsigned char epd_bitmap_frame_00_delay_0 [] PROGMEM = {
 	0xff, 0xff, 0xff, 0xff, 0xfc, 0x20, 0xff, 0xff, 0xe0, 0x00, 0x00, 0x03, 0xff, 0xff, 0xff, 0xff, 
@@ -1655,7 +1656,7 @@ void saveConfig() {
   doc["utcOffset"] = config.utcOffset;
   doc["bitmapWindowStart"] = config.bitmapWindowStart;
   doc["bitmapWindowEnd"] = config.bitmapWindowEnd;
-  doc["displayTheme"] = config.displayTheme;
+	doc["displayTheme"] = config.displayTheme;
   JsonArray arr = doc.createNestedArray("buzzTimes");
   for (int i = 0; i < MAX_BUZZ; i++) {
     JsonObject obj = arr.createNestedObject();
@@ -1677,7 +1678,7 @@ bool loadConfig() {
   config.ssid = doc["ssid"].as<String>();
   config.pass = doc["pass"].as<String>();
   config.utcOffset = doc["utcOffset"] | 7;
-  config.displayTheme = doc["displayTheme"] | 0; // default to 0
+	config.displayTheme = doc["displayTheme"] | 0; // default to 0
   config.bitmapWindowStart = doc["bitmapWindowStart"] | 20; // default 20
   config.bitmapWindowEnd = doc["bitmapWindowEnd"] | 30;     // default 30
   JsonArray arr = doc["buzzTimes"].as<JsonArray>();
@@ -1703,7 +1704,7 @@ String message =
     "Get current time and UTC offset:\n"
     "  http://<esp_ip>/gettime\n"
     "\n"
-    "Add a buzz time (max=7) (optional song: hedwig, merry):\n"
+    "Add a buzz time (max=7) (optional song: hedwig, merry, shapeofyou, pirates, pinkpanther, nokia):\n"
     "  http://<esp_ip>/buzztime?add=06:30[&song=hedwig]\n"
     "\n"
     "Change the song for an existing buzz time:\n"
@@ -1738,6 +1739,10 @@ String message =
     "\n"
     "Get temperature and humidity (DHT):\n"
     "  http://<esp_ip>/getdht\n"
+	"\n"
+	"Buzz immediately (optional song):\n"
+	"  http://<esp_ip>/buzznow?song=hedwig\n"
+	"\n"
     "-----------------------------------------\n"
     "Nana will always play 'hedwig' unless you pick another song~\n";
 
@@ -1746,10 +1751,11 @@ String message =
 
 void handleSetTime() {
   if (server.hasArg("utc")) {
+    String response = "UTC offset set & saved.";
+    server.send(200, "text/plain", response); // Respond first
     config.utcOffset = server.arg("utc").toInt();
     if (timeClient) timeClient->setTimeOffset(3600 * config.utcOffset);
     saveConfig();
-    server.send(200, "text/plain", "UTC offset set & saved.");
   } else {
     server.send(400, "text/plain", "Missing utc parameter");
   }
@@ -1762,6 +1768,7 @@ void handleGetTime() {
 // 3. Update handleBuzzTime API
 void handleBuzzTime() {
   String response = "";
+  bool doSave = false;
   if (server.hasArg("add")) {
     String t = server.arg("add");
     String song = server.hasArg("song") ? server.arg("song") : "hedwig";
@@ -1776,14 +1783,16 @@ void handleBuzzTime() {
           config.buzzTimes[i].song = song;
           response = "Added buzz time: " + t + " with song: " + song;
           added = true;
+          doSave = true;
           break;
         }
       }
       if (!added) response = "Buzz time list full.";
-      else saveConfig();
     } else {
       response = "Buzz time already exists.";
     }
+    server.send(200, "text/plain", response); // Respond first
+    if (doSave) saveConfig();
   } else if (server.hasArg("remove")) {
     String t = server.arg("remove");
     bool found = false;
@@ -1793,12 +1802,13 @@ void handleBuzzTime() {
         config.buzzTimes[i].song = "";
         found = true;
         response = "Removed buzz time: " + t;
-        saveConfig();
+        doSave = true;
       }
     }
     if (!found) response = "Buzz time not found.";
+    server.send(200, "text/plain", response); // Respond first
+    if (doSave) saveConfig();
   } else if (server.hasArg("set")) {
-    // Update song for an existing time
     String t = server.arg("set");
     String song = server.hasArg("song") ? server.arg("song") : "hedwig";
     bool found = false;
@@ -1807,27 +1817,29 @@ void handleBuzzTime() {
         config.buzzTimes[i].song = song;
         found = true;
         response = "Set song for " + t + " to " + song;
-        saveConfig();
+        doSave = true;
         break;
       }
     }
     if (!found) response = "Buzz time not found.";
+    server.send(200, "text/plain", response); // Respond first
+    if (doSave) saveConfig();
   } else {
     response = "Current buzz times:\n";
     for (int i = 0; i < MAX_BUZZ; i++) {
       if (config.buzzTimes[i].time.length() != 0)
         response += config.buzzTimes[i].time + " - " + config.buzzTimes[i].song + "\n";
     }
+    server.send(200, "text/plain", response); // No blocking logic after
   }
-  server.send(200, "text/plain", response);
 }
 
 void handleSetWiFi() {
   if (server.hasArg("ssid") && server.hasArg("pass")) {
+    server.send(200, "text/plain", "WiFi credentials updated. Reboot to apply."); // Respond first
     config.ssid = server.arg("ssid");
     config.pass = server.arg("pass");
     saveConfig();
-    server.send(200, "text/plain", "WiFi credentials updated. Reboot to apply.");
   } else {
     server.send(400, "text/plain", "Missing ssid or pass parameter");
   }
@@ -1835,21 +1847,24 @@ void handleSetWiFi() {
 
 void handleBitmapWindow() {
   String response = "";
+  bool doSave = false;
   if (server.hasArg("start") && server.hasArg("end")) {
     int start = server.arg("start").toInt();
     int end = server.arg("end").toInt();
     if (start >= 0 && start < 60 && end > start && end <= 60) {
       config.bitmapWindowStart = start;
       config.bitmapWindowEnd = end;
-      saveConfig();
       response = "Bitmap window set to minutes [" + String(start) + " - " + String(end) + "]";
+      doSave = true;
     } else {
       response = "Invalid range. Start and end must be 0..59 and end > start.";
     }
+    server.send(200, "text/plain", response); // Respond first
+    if (doSave) saveConfig();
   } else {
     response = "Current bitmap window: [" + String(config.bitmapWindowStart) + " - " + String(config.bitmapWindowEnd) + "]";
+    server.send(200, "text/plain", response); // No blocking logic after
   }
-  server.send(200, "text/plain", response);
 }
 
 void handleIpAddress() {
@@ -1886,12 +1901,26 @@ void handleGetDHT() {
 void handleDisplayTheme() {
   if (server.hasArg("theme")) {
     int theme = server.arg("theme").toInt();
+    String response = "Theme set.";
+    server.send(200, "text/plain", response); // Respond first
     config.displayTheme = (theme == 1) ? 1 : 0;
     saveConfig();
-    server.send(200, "text/plain", "Theme set.");
   } else {
-    server.send(200, "text/plain", String(config.displayTheme));
+    server.send(200, "text/plain", String(config.displayTheme)); // No blocking logic after
   }
+}
+
+void handleBuzzNow() {
+  String response;
+  String song = "hedwig";
+  if (server.hasArg("song")) {
+    song = server.arg("song");
+    response = "Buzzed now: " + song;
+  } else {
+    response = "Buzzed now: hedwig";
+  }
+  server.send(200, "text/plain", response); 
+  buzzNow(song);
 }
 
 // TO DO : MAKE THE FUCKING POST TO SERVER WORKS
@@ -1995,6 +2024,154 @@ int melodyMerry[] = {
   698,2, REST,4
 };
 
+// "Shape of You" melody with integer frequencies and duration codes
+int tempoShapeOfYou = 110;
+
+int melodyShapeOfYou[] = {
+  277,2, 330,2, 277,4, 277,2, 330,2,  // Cs4, E4, ...
+  277,4, 277,2, 330,2, 277,4, 311,2,  // Cs4, E4, Cs4, Ds4
+  277,2, 277,2, 330,2, 277,2,         // Cs4, Cs4, E4, Cs4
+  247,2,                              // B3
+
+  277,2, 330,2, 277,4, 277,2, 330,2,
+  277,4, 311,2, 277,2, 330,2,
+  247,2,
+
+  330,8, 330,8, 330,4, 330,4, 330,8, 330,8, 330,8, 330,8, 330,8,
+  330,8, 330,8, 330,4, 330,2, 370,8, 415,8, 415,4,
+  415,8, 330,8, 370,4, 494,8, 415,8, 415,8, 415,8, 415,8,
+  370,4, 370,8, 370,4, 415,8, 370,8, 370,8, 370,8, 370,8, 415,4, 370,8,
+
+  330,8, 277,8, 277,8, 415,4, 415,8,
+  415,8, 415,8, 415,8, 415,8, 415,8, 415,8, 415,8, 415,8, 415,8,
+  415,8, 494,8, 415,8, 415,4, 370,8, 370,8, 330,8, 415,8,
+  370,8, 330,8, 330,8, 330,8, 494,4, 415,8, 415,8, 415,8, 370,8,
+  370,8, 370,8, 370,8, 370,8, 370,8, 370,8, 370,8, 370,8,
+  330,8, 277,8, 277,8, 277,8, 277,8, 277,8,
+  208,8, 247,8,
+
+  277,8, 277,8, 370,8, 415,8, 330,8, 370,8,
+  247,8,
+  330,8, 370,8, 415,8, 370,8, 330,8, 277,8, 330,8, 415,8,
+  370,8, 330,8, 370,8, 277,8, 494,8, 415,8, 415,8, 370,8, 370,8,
+  330,8, 277,8, 330,8, 370,8, 415,8, 370,8, 330,8,
+  370,8, 330,8, 277,8, 277,8,
+  247,8,
+  277,8, 277,8, 370,8, 415,8, 330,8, 370,8, 370,8,
+  247,8,
+  370,8, 415,8, 370,8, 330,8, 277,8, 330,8, 415,8, 370,8,
+  330,8, 370,8, 277,8, 494,8, 415,8, 415,8, 370,8, 370,8, 330,8,
+  277,8, 494,8, 415,8, 415,8, 370,8, 370,8, 330,8,
+  277,8, 277,8,
+  208,8, 247,8,
+  330,8, 370,8, 415,8, 370,8, 330,8, 330,8, 330,8, 370,8, 370,8,
+  330,8, 370,8, 415,8, 370,8, 330,8, 330,8, 330,8, 370,8,
+  277,8, 330,8, 370,8, 415,8, 277,8,
+  330,8, 330,8, 370,8, 370,8, 330,8, 370,8, 415,8,
+  370,8, 330,8, 330,8, 370,8, 277,8, 277,8,
+  370,8, 415,8, 494,8, 415,8, 370,8, 330,8, 330,8, 370,8,
+  330,8, 370,8, 415,8, 370,8, 330,8, 330,8, 370,8,
+  277,8, 277,8, 277,8, 277,8, 277,8, 330,8, 370,8, 415,8, 277,8, 330,8,
+  370,8, 330,8, 370,8, 330,8, 370,8, 415,8,
+  370,8, 330,8, 330,8, 370,8, 277,8, 277,8, 277,8, 330,8, 330,8,
+  370,8, 370,8, 415,8, 415,8,
+  330,8, 370,8, 415,8, 370,8, 330,8, 330,8, 370,8, 277,8, 277,8,
+  277,8, 330,8, 330,8, 370,8, 370,8, 415,8,
+  415,8, 330,8, 370,8, 415,8, 370,8,
+  330,8, 330,8, 370,8, 277,8, 277,8, 277,8, 330,8, 330,8,
+  370,8, 370,8, 415,8, 415,8,
+  330,8, 370,8, 415,8, 370,8, 330,8, 330,8, 370,8, 277,8, 277,8,
+  277,8, 277,8, 277,8, 277,8, 330,8, 370,8, 415,8, 277,8, 330,8, 370,8,
+  277,8
+};
+
+int tempopirates = 120;
+
+int melodypirates[] = {
+  330,8, 392,8, 440,4, 440,8, 0,8,
+  440,8, 494,8, 523,4, 523,8, 0,8,
+  523,8, 587,8, 494,4, 494,8, 0,8,
+  440,8, 392,8, 440,4, 0,8,
+
+  330,8, 392,8, 440,4, 440,8, 0,8,
+  440,8, 494,8, 523,4, 523,8, 0,8,
+  523,8, 587,8, 494,4, 494,8, 0,8,
+  440,8, 392,8, 440,4, 0,8,
+
+  330,8, 392,8, 440,4, 440,8, 0,8,
+  440,8, 523,8, 587,4, 587,8, 0,8,
+  587,8, 659,8, 698,4, 698,8, 0,8,
+  659,8, 587,8, 659,8, 440,4, 0,8,
+
+  440,8, 494,8, 523,4, 523,8, 0,8,
+  587,4, 659,8, 440,4, 0,8,
+  440,8, 523,8, 494,4, 494,8, 0,8,
+  523,8, 440,8, 494,4, 0,4,
+
+  440,4, 440,8,
+  // Repeat
+  440,8, 494,8, 523,4, 523,8, 0,8,
+  523,8, 587,8, 494,4, 494,8, 0,8,
+  440,8, 392,8, 440,4, 0,8,
+
+  330,8, 392,8, 440,4, 440,8, 0,8,
+  440,8, 494,8, 523,4, 523,8, 0,8,
+  523,8, 587,8, 494,4, 494,8, 0,8,
+  440,8, 392,8, 440,4, 0,8,
+
+  330,8, 392,8, 440,4, 440,8, 0,8,
+  440,8, 523,8, 587,4, 587,8, 0,8,
+  587,8, 659,8, 698,4, 698,8, 0,8,
+  659,8, 587,8, 659,8, 440,4, 0,8,
+
+  440,8, 494,8, 523,4, 523,8, 0,8,
+  587,4, 659,8, 440,4, 0,8,
+  440,8, 523,8, 494,4, 494,8, 0,8,
+  523,8, 440,8, 494,4, 0,4,
+
+  659,4, 0,8, 0,4, 698,4, 0,8, 0,4,
+  659,8, 659,8, 0,8, 784,8, 0,8, 659,8, 587,8, 0,8, 0,4,
+  587,4, 0,8, 0,4, 523,4, 0,8, 0,4,
+  494,8, 523,8, 0,8, 494,8, 0,8, 440,2,
+
+  659,4, 0,8, 0,4, 698,4, 0,8, 0,4,
+  659,8, 659,8, 0,8, 784,8, 0,8, 659,8, 587,8, 0,8, 0,4,
+  587,4, 0,8, 0,4, 523,4, 0,8, 0,4,
+  494,8, 523,8, 0,8, 494,8, 0,8, 440,2
+};
+
+int tempoPinkPanther = 120; // adjust as you like
+
+int melodyPinkPanther[] = {
+  0,2, 0,4, 0,8, 311,8, // REST, REST, REST, Ds4
+  330,4, 0,8, 370,8, 392,4, 0,8, 311,8, // E4, REST, Fs4, G4, REST, Ds4
+  330,8, 370,8, 392,8, 523,8, 494,8, 330,8, 392,8, 494,8, // E4, Fs4, G4, C5, B4, E4, G4, B4
+  466,2, 440,16, 392,16, 330,16, 294,16, // As4, A4, G4, E4, D4
+  330,2, 0,4, 0,8, 311,4, // E4, REST, REST, Ds4
+
+  330,4, 0,8, 370,8, 392,4, 0,8, 311,8, // E4, REST, Fs4, G4, REST, Ds4
+  330,8, 370,8, 392,8, 523,8, 494,8, 392,8, 494,8, 659,8, // E4, Fs4, G4, C5, B4, G4, B4, E5
+  622,1,   // Ds5
+  587,2, 0,4, 0,8, 311,8, // D5, REST, REST, Ds4
+  330,4, 0,8, 370,8, 392,4, 0,8, 311,8, // E4, REST, Fs4, G4, REST, Ds4
+  330,8, 370,8, 392,8, 523,8, 494,8, 330,8, 392,8, 494,8, // E4, Fs4, G4, C5, B4, E4, G4, B4
+
+  466,2, 440,16, 392,16, 330,16, 294,16, // As4, A4, G4, E4, D4
+  330,4, 0,4, // E4, REST
+  0,4, 659,8, 587,8, 494,8, 440,8, 392,8, 330,8, // REST, E5, D5, B4, A4, G4, E4
+  466,16, 440,8, 466,16, 440,8, 466,16, 440,8, 466,16, 440,8, // As4, A4, As4, A4, As4, A4, As4, A4
+  392,16, 330,16, 294,16, 330,16, 330,16, 330,2 // G4, E4, D4, E4, E4, E4
+};
+
+int tempoNokia = 140; // You can tweak the tempo if you want
+
+int melodyNokia[] = {
+  659,8, 587,8, 370,4, 415,4,     // E5, D5, Fs4, Gs4
+  554,8, 494,8, 294,4, 330,4,     // Cs5, B4, D4, E4
+  494,8, 440,8, 277,4, 330,4,     // B4, A4, Cs4, E4
+  440,2                          // A4
+};
+
 void playMelody(int* melody, int noteCount, int tempo) {
   int wholenote = (60000 * 4) / tempo;
   for (int i = 0; i < noteCount * 2; i += 2) {
@@ -2025,6 +2202,22 @@ void buzzNow(String songName) {
     Serial.println("Playing: We Wish You a Merry Christmas");
     int noteCount = sizeof(melodyMerry) / sizeof(melodyMerry[0]) / 2;
     playMelody(melodyMerry, noteCount, tempoMerry);
+  } else if (songName == "shapeofyou") {
+		Serial.println("Playing: Shape of You");
+		int noteCount = sizeof(melodyShapeOfYou) / sizeof(melodyShapeOfYou[0]) / 2;
+		playMelody(melodyShapeOfYou, noteCount, tempoShapeOfYou);
+  } else if (songName == "pirates") {
+		Serial.println("Playing: pirates of carabien");
+		int noteCount = sizeof(melodypirates) / sizeof(melodypirates[0]) / 2;
+		playMelody(melodypirates, noteCount, tempopirates);
+  } else if (songName == "pinkpanther") {
+		Serial.println("Playing: Pink Panther");
+		int noteCount = sizeof(melodyPinkPanther) / sizeof(melodyPinkPanther[0]) / 2;
+		playMelody(melodyPinkPanther, noteCount, tempoPinkPanther);
+  } else if (songName == "nokia") {
+		Serial.println("Playing: Nokia Tune");
+		int noteCount = sizeof(melodyNokia) / sizeof(melodyNokia[0]) / 2;
+		playMelody(melodyNokia, noteCount, tempoNokia);
   } else {
     Serial.println("Unknown song: " + songName);
   }
@@ -2039,7 +2232,6 @@ void animateBitmap() {
   }
 }
 
-// --- showing the time in tft ---
 void showTime() {
   int h = timeClient->getHours();
   int m = timeClient->getMinutes();
@@ -2283,9 +2475,10 @@ void setup() {
   server.on("/setwifi", handleSetWiFi);
   server.on("/getwifi", handleGetWiFi);
   server.on("/bitmapwindow", handleBitmapWindow);
-	server.on("/ipaddress", handleIpAddress);
-	server.on("/getdht", handleGetDHT);
-	server.on("/displaytheme", handleDisplayTheme);
+  server.on("/ipaddress", handleIpAddress);
+  server.on("/getdht", handleGetDHT);
+  server.on("/displaytheme", handleDisplayTheme);
+  server.on("/buzznow", handleBuzzNow);
   server.begin();
   showInfo("Nana Ready! IP:" + WiFi.localIP().toString());
   delay(5000);

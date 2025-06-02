@@ -76,14 +76,25 @@ if (isset($_POST['set_utc_offset']) && isset($_POST['utc_offset']) && $esp_ip) {
     $utc_offset = $_POST['utc_offset'];
 }
 
-// Main API commands
+// Only commands (theme and dht removed, handled in info panel)
 $api_commands = [
     [
         'label' => 'Add a buzz time',
         'endpoint' => 'buzztime',
         'params' => [
             'add' => ['label' => 'Time (HH:MM)', 'type' => 'time'],
-            'song' => ['label' => 'Song', 'type' => 'select', 'options' => ['hedwig' => 'Hedwig', 'merry' => 'Merry']]
+            'song' => [
+                'label' => 'Song',
+                'type' => 'select',
+                'options' => [
+                    'hedwig' => 'Hedwig',
+                    'merry' => 'Merry',
+                    'shapeofyou' => 'Shape of You',
+                    'pirates' => 'Pirates',
+                    'pinkpanther' => 'Pink Panther',
+                    'nokia' => 'Nokia'
+                ]
+            ]
         ]
     ],
     [
@@ -91,7 +102,18 @@ $api_commands = [
         'endpoint' => 'buzztime',
         'params' => [
             'set' => ['label' => 'Time (HH:MM)', 'type' => 'custom', 'options' => []],
-            'song' => ['label' => 'Song', 'type' => 'select', 'options' => ['hedwig' => 'Hedwig', 'merry' => 'Merry']]
+            'song' => [
+                'label' => 'Song',
+                'type' => 'select',
+                'options' => [
+                    'hedwig' => 'Hedwig',
+                    'merry' => 'Merry',
+                    'shapeofyou' => 'Shape of You',
+                    'pirates' => 'Pirates',
+                    'pinkpanther' => 'Pink Panther',
+                    'nokia' => 'Nokia'
+                ]
+            ]
         ]
     ],
     [
@@ -107,6 +129,25 @@ $api_commands = [
         'params' => [
             'start' => ['label' => 'Start (min)', 'type' => 'number'],
             'end' => ['label' => 'End (min)', 'type' => 'number']
+        ]
+    ],
+    [
+        'label' => 'play a buzz now',
+        'endpoint' => 'buzznow',
+        'params' => [
+            'song' => [
+                'label' => 'Song (default: hedwig)',
+                'type' => 'select',
+                'options' => [
+                    '' => '(Default: Hedwig)',
+                    'hedwig' => 'Hedwig',
+                    'merry' => 'Merry',
+                    'shapeofyou' => 'Shape of You',
+                    'pirates' => 'Pirates',
+                    'pinkpanther' => 'Pink Panther',
+                    'nokia' => 'Nokia'
+                ]
+            ]
         ]
     ]
 ];
