@@ -679,7 +679,7 @@ if (isset($_POST['endpoint']) && isset($_POST['command'])) {
             const dhtValue = document.getElementById('dhtValue');
             const dhtLoading = document.getElementById('dhtLoading');
             dhtLoading.style.display = "";
-            fetch("http://<?= $esp_ip ?>/getdht")
+            fetch("/esp_proxy.php?esp_ip=<?= urlencode($esp_ip) ?>&path=getdht")
                 .then(r => {
                     if (!r.ok) throw new Error("HTTP error: " + r.status);
                     return r.text();
