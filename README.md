@@ -199,6 +199,9 @@ Replace `XX` and `YY` with the minute values you want.
 > Temporary API server: `http://localhost:2000/nanaclock.php` (can be changed).
 
 > [!IMPORTANT]
+> The code for sending IP automaticly to the server only works if we served the server on plain HTTP and have no TLS (somehow i cannot figure it out with HTTPS😭).
+
+> [!IMPORTANT]
 > OLED in schematic is for illustration.
 
 
