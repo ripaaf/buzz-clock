@@ -31,7 +31,8 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 WiFiUDP ntpUDP;
 NTPClient* timeClient = nullptr;
 // --- SERVER URL ---
-const char* serverUrl = "http://localhost:2000/nanaclock.php"; //stil under development
+const char* serverHost = "sample.com"; // your ngrok host
+const char* serverPath = "/nanaclock/nanaclock.php"; 
 
 // --- Buzzer ---
 #define BUZZER_PIN D5
@@ -1925,32 +1926,24 @@ void handleBuzzNow() {
 
 // TO DO : MAKE THE FUCKING POST TO SERVER WORKS
 
-// void sendIpAddressToServer() {
-//   String ipAddress = WiFi.localIP().toString();
-//   String url = String(serverUrl) + "?ipaddress=" + ipAddress;
+void sendIpAddressToServer() {
+  if (WiFi.status() != WL_CONNECTED) return;
 
-//   WiFiClientSecure clients;
-//   clients.setInsecure(); // Don't validate SSL cert (for testing)
+  String uri = String(serverPath) + "?ipaddress=" + WiFi.localIP().toString();
+  WiFiClient client;
+  HTTPClient http;
 
-//   HTTPClient http; // <-- You forgot this line, master!
-
-//   Serial.print("Server URL: ");
-//   Serial.println(url);
-
-//   if (!http.begin(clients, url)) {
-//     Serial.println("HTTPClient begin() failed!");
-//     return;
-//   }
-
-//   int httpResponseCode = http.GET();
-
-//   String response = http.getString();
-//   Serial.println("Server response: " + response);
-//   Serial.println("HTTP response code: " + String(httpResponseCode));
-
-//   http.end();
-// }
-
+  if (!http.begin(client, String("http://") + serverHost + uri)) {
+    Serial.println("HTTP begin() failed");
+    return;
+  }
+  http.useHTTP10(true);
+  http.setTimeout(15000);
+  int code = http.GET();
+  Serial.printf("HTTP code: %d\n", code);
+  if (code > 0) Serial.println(http.getString());
+  http.end();
+}
 
 // Tempo definitions
 int tempoHedwig = 144;
