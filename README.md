@@ -26,7 +26,7 @@
 
 ---
 
-## 🛠️ Supported Hardware
+## 🛠️ Hardware Needed
 
 - **ESP8266 board:** NodeMCU/WeMos D1 Mini/etc.
 - **OLED SSD1306 128x64 I2C**
