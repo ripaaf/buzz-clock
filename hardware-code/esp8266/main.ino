@@ -31,7 +31,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 WiFiUDP ntpUDP;
 NTPClient* timeClient = nullptr;
 // --- SERVER URL ---
-const char* serverHost = "sample.com"; // your ngrok host
+const char* serverHost = "localhost:2000"; // your ngrok host
 const char* serverPath = "/nanaclock/nanaclock.php"; 
 
 // --- Buzzer ---
