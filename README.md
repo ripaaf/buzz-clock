@@ -207,9 +207,7 @@ Replace `XX` and `YY` with the minute values you want.
 
 ## 🐾 Credits
 
-- **NanaClock** by rifa (yusariin) — Mascot: Nana 🐾
-- Inspired by various open source ESP8266 clock projects.
-
+- **Arduino Songs** [by robsoncouto](https://github.com/robsoncouto/arduino-songs)
 
 ## 📄 License
 
