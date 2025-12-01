@@ -147,7 +147,7 @@ http://<esp-ip>/
 
 ## 🎨 Customization
 
-- **Bitmap Animation:** Modify the `epd_bitmap_allArray` in the code for your own bitmap images (`PROGMEM`), you can use this [link](https://javl.github.io/image2cpp/) to convert image to bitmap.
+- **Bitmap Animation:** Modify the `epd_bitmap_allArray` in the code for your own bitmap images (`PROGMEM`), you can use this [link](https://javl.github.io/image2cpp/) to convert image to bitmap and use [Lopaka](https://lopaka.app/) for the UI Designer.
 - **Alarm Songs:** Add new songs to the `buzzNow` function.
 - **Number of Alarms:** To support more than 7 alarms, change `MAX_BUZZ` in the code.
   ```
